@@ -185,10 +185,15 @@ public class GriefPreventionHook implements Listener {
 
         // If trying to enter a protected claim while in combat
         if (!fromProtected && toProtected) {
-            // Push player back
-            pushPlayerBack(player, from, to);
+            event.setCancelled(true);
+            
+            Location safeLocation = getSafeLocationNearby(from, player);
+            if (safeLocation != null) {
+                player.teleport(safeLocation);
+            } else {
+                pushPlayerBack(player, from, to);
+            }
 
-            // Send message
             sendCooldownMessage(player);
         }
 
@@ -579,6 +584,18 @@ public class GriefPreventionHook implements Listener {
         }
     }
 
+    public boolean isSafeZone(Location location) {
+        if (location == null) return false;
+        
+        try {
+            Claim claim = GriefPrevention.instance.dataStore.getClaimAt(location, false, null);
+            return claim != null;
+        } catch (Exception e) {
+            plugin.getLogger().warning("Error checking GriefPrevention claim: " + e.getMessage());
+            return false;
+        }
+    }
+
     /**
      * Checks if a location is in a protected claim (claim that the player cannot access)
      */
@@ -625,6 +642,38 @@ public class GriefPreventionHook implements Listener {
         Block ground = location.clone().add(0, -1, 0).getBlock();
 
         // Location is safe if feet and head are air, and ground is solid
+        return (feet.getType() == Material.AIR || !feet.getType().isSolid())
+                && (head.getType() == Material.AIR || !head.getType().isSolid())
+                && ground.getType().isSolid();
+    }
+
+    private Location getSafeLocationNearby(Location location, Player player) {
+        if (location == null) return null;
+        
+        for (int radius = 1; radius <= 3; radius++) {
+            for (int x = -radius; x <= radius; x++) {
+                for (int z = -radius; z <= radius; z++) {
+                    if (x == 0 && z == 0) continue;
+                    
+                    Location checkLoc = location.clone().add(x, 0, z);
+                    if (isLocationSafeForMovement(checkLoc, player)) {
+                        return checkLoc;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isLocationSafeForMovement(Location location, Player player) {
+        if (location == null) return false;
+        
+        if (isInProtectedClaim(location, player)) return false;
+        
+        Block feet = location.getBlock();
+        Block head = location.clone().add(0, 1, 0).getBlock();
+        Block ground = location.clone().add(0, -1, 0).getBlock();
+
         return (feet.getType() == Material.AIR || !feet.getType().isSolid())
                 && (head.getType() == Material.AIR || !head.getType().isSolid())
                 && ground.getType().isSolid();

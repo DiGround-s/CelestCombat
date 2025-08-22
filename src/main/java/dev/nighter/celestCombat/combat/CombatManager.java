@@ -48,6 +48,9 @@ public class CombatManager {
     private boolean tridentEnabled;
     private boolean refreshCombatOnTridentLand;
     private Map<String, Boolean> worldTridentBannedSettings = new ConcurrentHashMap<>();
+    
+    // Combat disabled worlds configuration
+    private Map<String, Boolean> combatDisabledWorlds = new ConcurrentHashMap<>();
 
     // Cleanup task for expired cooldowns
     private Scheduler.Task cleanupTask;
@@ -83,6 +86,9 @@ public class CombatManager {
 
         // Load per-world settings
         loadWorldEnderPearlSettings();
+        
+        // Load combat disabled worlds
+        loadCombatDisabledWorlds();
 
         // Start the global countdown timer
         startGlobalCountdownTimer();
@@ -131,6 +137,7 @@ public class CombatManager {
         this.tridentInCombatOnly = plugin.getConfig().getBoolean("trident_cooldown.in_combat_only", true);
         this.refreshCombatOnTridentLand = plugin.getConfig().getBoolean("trident.refresh_combat_on_land", false);
         loadWorldTridentSettings();
+        loadCombatDisabledWorlds();
     }
 
 
@@ -142,6 +149,17 @@ public class CombatManager {
             for (String worldName : Objects.requireNonNull(plugin.getConfig().getConfigurationSection("enderpearl_cooldown.worlds")).getKeys(false)) {
                 boolean enabled = plugin.getConfig().getBoolean("enderpearl_cooldown.worlds." + worldName, true);
                 worldEnderPearlSettings.put(worldName, enabled);
+            }
+        }
+    }
+    
+    private void loadCombatDisabledWorlds() {
+        combatDisabledWorlds.clear();
+
+        if (plugin.getConfig().isConfigurationSection("combat.disabled_worlds")) {
+            for (String worldName : Objects.requireNonNull(plugin.getConfig().getConfigurationSection("combat.disabled_worlds")).getKeys(false)) {
+                boolean disabled = plugin.getConfig().getBoolean("combat.disabled_worlds." + worldName, false);
+                combatDisabledWorlds.put(worldName, disabled);
             }
         }
     }
@@ -275,6 +293,12 @@ public class CombatManager {
         if (player.hasPermission("celestcombat.bypass.tag")) {
             return;
         }
+        
+        // Check if combat is disabled in this world
+        String worldName = player.getWorld().getName();
+        if (combatDisabledWorlds.getOrDefault(worldName, false)) {
+            return;
+        }
 
         PlayerCombatTagEvent event = new PlayerCombatTagEvent(player, attacker, combatDurationMillis);
         Bukkit.getPluginManager().callEvent(event);
@@ -297,8 +321,10 @@ public class CombatManager {
             }
         }
 
-        if (shouldDisableFlight(player) && player.isFlying()) {
+        // Disable flight instantly when entering combat (before setting combat state)
+        if (disableFlightInCombat) {
             player.setFlying(false);
+            player.setAllowFlight(false);
         }
 
         combatOpponents.put(playerUUID, attacker.getUniqueId());

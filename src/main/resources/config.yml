@@ -71,6 +71,13 @@ combat:
   # Disable flight (Creative fly) during combat
   disable_flight: false
 
+  # Worlds where combat tagging is disabled
+  # Players in these worlds will never be tagged in combat
+  disabled_worlds:
+    # spawn_world: true  # Example: disable combat tagging in spawn world
+    # minigames: true    # Example: disable combat tagging in minigames world
+    # Add world names as needed
+
   # Items blocked during combat (Foods, Potions, Elytra)
   item_restrictions:
     # Enable or disable item restrictions during combat

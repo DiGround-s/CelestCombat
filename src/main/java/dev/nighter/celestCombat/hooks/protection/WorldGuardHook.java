@@ -262,7 +262,6 @@ public class WorldGuardHook implements Listener {
 
         Player player = event.getPlayer();
 
-        // Check if enabled in this world
         if (!isEnabledInWorld(player.getWorld())) {
             removePlayerBarriers(player);
             return;
@@ -282,16 +281,21 @@ public class WorldGuardHook implements Listener {
             return;
         }
 
-        // Batch safezone checks to reduce WorldGuard API calls
         SafeZoneInfo fromInfo = getSafeZoneInfo(from);
         SafeZoneInfo toInfo = getSafeZoneInfo(to);
 
         if (!fromInfo.isSafeZone && toInfo.isSafeZone) {
-            pushPlayerBack(player, from, to);
+            event.setCancelled(true);
+            
+            Location safeLocation = getSafeLocationNearby(from);
+            if (safeLocation != null) {
+                player.teleport(safeLocation);
+            } else {
+                pushPlayerBack(player, from, to);
+            }
             sendCooldownMessage(player, "combat_no_safezone_entry");
         }
 
-        // Throttle barrier updates per player
         updatePlayerBarriersThrottled(player);
     }
 
@@ -655,7 +659,7 @@ public class WorldGuardHook implements Listener {
         }
     }
 
-    private boolean isSafeZone(Location location) {
+    public boolean isSafeZone(Location location) {
         return getSafeZoneInfo(location).isSafeZone;
     }
 
@@ -690,6 +694,38 @@ public class WorldGuardHook implements Listener {
         }
 
         return null;
+    }
+
+    private Location getSafeLocationNearby(Location location) {
+        if (location == null) return null;
+        
+        for (int radius = 1; radius <= 3; radius++) {
+            for (int x = -radius; x <= radius; x++) {
+                for (int z = -radius; z <= radius; z++) {
+                    if (x == 0 && z == 0) continue;
+                    
+                    Location checkLoc = location.clone().add(x, 0, z);
+                    if (isLocationSafeForMovement(checkLoc)) {
+                        return checkLoc;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean isLocationSafeForMovement(Location location) {
+        if (location == null) return false;
+        
+        if (isSafeZone(location)) return false;
+        
+        Block feet = location.getBlock();
+        Block head = location.clone().add(0, 1, 0).getBlock();
+        Block ground = location.clone().add(0, -1, 0).getBlock();
+
+        return (feet.getType() == Material.AIR || !feet.getType().isSolid())
+                && (head.getType() == Material.AIR || !head.getType().isSolid())
+                && ground.getType().isSolid();
     }
 
     private boolean isLocationSafe(Location location) {
