@@ -41,12 +41,12 @@ public class TeleportListener implements Listener {
         
         PlayerTeleportEvent.TeleportCause cause = event.getCause();
         
-        if (isAllowedTeleportCause(cause)) {
+        if (isTeleportToSafeZone(from, to)) {
+            event.setCancelled(true);
             return;
         }
         
-        if (isTeleportToSafeZone(from, to)) {
-            event.setCancelled(true);
+        if (isAllowedTeleportCause(cause)) {
             return;
         }
         
