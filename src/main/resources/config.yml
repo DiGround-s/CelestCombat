@@ -231,6 +231,11 @@ safezone_protection:
   # This will prevent players from entering safezones while in combat
   enabled: true
 
+  # Enable/disable visual barriers (blocks sent to client)
+  # If disabled, players will only be pushed back without seeing barrier blocks
+  # This can improve performance by reducing packet usage
+  show_barriers: true
+
   # Block type for the barrier
   # Set "BARRIER" for invisible but solid barrier
   # Valid materials can be found at: https://jd.papermc.io/paper/1.21.5/org/bukkit/Material.html

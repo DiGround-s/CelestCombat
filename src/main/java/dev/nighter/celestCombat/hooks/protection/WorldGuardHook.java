@@ -52,6 +52,7 @@ public class WorldGuardHook implements Listener {
 
     // Configuration
     private boolean globalEnabled;
+    private boolean showBarriers;
     private Map<String, Boolean> worldSettings;
     private int barrierDetectionRadius;
     private int barrierHeight;
@@ -68,7 +69,12 @@ public class WorldGuardHook implements Listener {
 
     // Batch processing for barrier updates
     private final Map<UUID, Long> lastBarrierUpdate = new ConcurrentHashMap<>();
-    private static final long BARRIER_UPDATE_INTERVAL = 250; // Only update barriers every 500ms per player
+    private static final long BARRIER_UPDATE_INTERVAL = 500; // Only update barriers every 500ms per player
+    
+    // Movement tracking for optimization
+    private final Map<UUID, String> lastLocationKey = new ConcurrentHashMap<>();
+    private final Map<UUID, Long> lastSignificantMove = new ConcurrentHashMap<>();
+    private static final long SIGNIFICANT_MOVE_THRESHOLD = 1000; // 1 second
 
     // Pre-computed region managers for performance
     private final Map<String, RegionManager> regionManagerCache = new ConcurrentHashMap<>();
@@ -117,6 +123,7 @@ public class WorldGuardHook implements Listener {
 
     public void reloadConfig() {
         this.globalEnabled = plugin.getConfig().getBoolean("safezone_protection.enabled", true);
+        this.showBarriers = plugin.getConfig().getBoolean("safezone_protection.show_barriers", false);
         this.worldSettings = loadWorldSettings();
         this.barrierDetectionRadius = plugin.getConfig().getInt("safezone_protection.barrier_detection_radius", 5);
         this.barrierHeight = plugin.getConfig().getInt("safezone_protection.barrier_height", 3);
@@ -129,6 +136,7 @@ public class WorldGuardHook implements Listener {
         regionManagerCache.clear();
 
         plugin.debug("WorldGuard safezone protection - Global enabled: " + globalEnabled);
+        plugin.debug("WorldGuard safezone protection - Show barriers: " + showBarriers);
         plugin.debug("WorldGuard safezone protection - World settings: " + worldSettings);
     }
 
@@ -263,40 +271,73 @@ public class WorldGuardHook implements Listener {
         Player player = event.getPlayer();
 
         if (!isEnabledInWorld(player.getWorld())) {
-            removePlayerBarriers(player);
+            if (showBarriers) {
+                removePlayerBarriers(player);
+            }
+            cleanupPlayerData(player.getUniqueId());
             return;
         }
 
         if (!combatManager.isInCombat(player)) {
-            removePlayerBarriers(player);
+            if (showBarriers) {
+                removePlayerBarriers(player);
+            }
+            cleanupPlayerData(player.getUniqueId());
             return;
         }
 
         Location from = event.getFrom();
         Location to = event.getTo();
 
+        // Early exit for same block movement
         if (to == null || (from.getBlockX() == to.getBlockX() &&
                 from.getBlockY() == to.getBlockY() &&
                 from.getBlockZ() == to.getBlockZ())) {
             return;
         }
 
+        // Check safezone entry FIRST - this is critical and cannot be optimized away
         SafeZoneInfo fromInfo = getSafeZoneInfo(from);
         SafeZoneInfo toInfo = getSafeZoneInfo(to);
 
         if (!fromInfo.isSafeZone && toInfo.isSafeZone) {
             event.setCancelled(true);
             
-            Location safeLocation = getSafeLocationNearby(from);
-            if (safeLocation != null) {
-                player.teleport(safeLocation);
-            } else {
+            // Force teleport back to original location first
+            Scheduler.runTask(() -> {
+                Location safeLocation = getSafeLocationNearby(from);
+                if (safeLocation != null) {
+                    player.teleport(safeLocation);
+                } else {
+                    player.teleport(from);
+                }
                 pushPlayerBack(player, from, to);
-            }
-            sendCooldownMessage(player, "combat_no_safezone_entry");
+                sendCooldownMessage(player, "combat_no_safezone_entry");
+            });
+            return; // Exit early after handling safezone entry
         }
 
-        updatePlayerBarriersThrottled(player);
+        // Now handle barrier updates with optimization
+        if (showBarriers) {
+            UUID playerUUID = player.getUniqueId();
+            String currentLocationKey = to.getWorld().getName() + ":" + to.getBlockX() + ":" + to.getBlockY() + ":" + to.getBlockZ();
+            String lastKey = lastLocationKey.get(playerUUID);
+            
+            if (!currentLocationKey.equals(lastKey)) {
+                lastLocationKey.put(playerUUID, currentLocationKey);
+                
+                // Throttle barrier updates for performance
+                long currentTime = System.currentTimeMillis();
+                Long lastSignificantMoveTime = lastSignificantMove.get(playerUUID);
+                boolean shouldUpdateBarriers = lastSignificantMoveTime == null || 
+                        currentTime - lastSignificantMoveTime > SIGNIFICANT_MOVE_THRESHOLD;
+
+                if (shouldUpdateBarriers) {
+                    updatePlayerBarriersThrottled(player);
+                    lastSignificantMove.put(playerUUID, currentTime);
+                }
+            }
+        }
     }
 
     private void updatePlayerBarriersThrottled(Player player) {
@@ -316,12 +357,21 @@ public class WorldGuardHook implements Listener {
 
         // Check if enabled in this world
         if (!isEnabledInWorld(player.getWorld())) {
-            removePlayerBarriers(player);
+            if (showBarriers) {
+                removePlayerBarriers(player);
+            }
             return;
         }
 
         if (!combatManager.isInCombat(player)) {
-            removePlayerBarriers(player);
+            if (showBarriers) {
+                removePlayerBarriers(player);
+            }
+            return;
+        }
+
+        // Skip barrier interaction handling if barriers are disabled
+        if (!showBarriers) {
             return;
         }
 
@@ -364,8 +414,8 @@ public class WorldGuardHook implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
-        // Check if enabled in this world
-        if (!isEnabledInWorld(event.getBlock().getWorld())) return;
+        // Check if enabled in this world and barriers are shown
+        if (!isEnabledInWorld(event.getBlock().getWorld()) || !showBarriers) return;
 
         Location blockLoc = normalizeToBlockLocation(event.getBlock().getLocation());
         if (originalBlocks.containsKey(blockLoc)) {
@@ -378,24 +428,38 @@ public class WorldGuardHook implements Listener {
         Player player = event.getPlayer();
         UUID playerUUID = player.getUniqueId();
 
-        removePlayerBarriers(player);
+        if (showBarriers) {
+            removePlayerBarriers(player);
+        }
+        cleanupPlayerData(playerUUID);
+    }
+    
+    private void cleanupPlayerData(UUID playerUUID) {
         lastMessageTime.remove(playerUUID);
         pearlThrowLocations.remove(playerUUID);
         lastBarrierUpdate.remove(playerUUID);
+        lastLocationKey.remove(playerUUID);
+        lastSignificantMove.remove(playerUUID);
         combatPlayerPearls.entrySet().removeIf(entry -> entry.getValue().equals(playerUUID));
     }
 
     private void pushPlayerBack(Player player, Location from, Location to) {
         Vector direction = from.toVector().subtract(to.toVector()).normalize();
-        direction.multiply(pushBackForce);
-
-        Location pushLocation = player.getLocation().clone();
-        pushLocation.add(direction);
-        pushLocation.setY(getSafeY(pushLocation));
-        pushLocation.setPitch(player.getLocation().getPitch());
-        pushLocation.setYaw(player.getLocation().getYaw());
-
+        
+        // Apply stronger pushback force
+        direction.multiply(pushBackForce * 2);
+        direction.setY(Math.max(direction.getY(), 0.2)); // Ensure some upward force
+        
+        // Apply velocity multiple times to ensure it takes effect
         player.setVelocity(direction);
+        
+        // Apply additional pushback after a short delay
+        Scheduler.runTaskLater(() -> {
+            if (player.isOnline() && combatManager.isInCombat(player)) {
+                Vector additionalPush = direction.clone().multiply(0.5);
+                player.setVelocity(additionalPush);
+            }
+        }, 2L);
     }
 
     private double getSafeY(Location loc) {
@@ -420,13 +484,18 @@ public class WorldGuardHook implements Listener {
     }
 
     private void updatePlayerBarriers(Player player) {
-        if (!combatManager.isInCombat(player)) {
+        if (!showBarriers || !combatManager.isInCombat(player)) {
             removePlayerBarriers(player);
             return;
         }
 
         Set<Location> newBarriers = findNearbyBarrierLocations(player.getLocation());
         Set<Location> currentBarriers = playerBarriers.getOrDefault(player.getUniqueId(), new HashSet<>());
+
+        // Only update if there's a significant change
+        if (newBarriers.equals(currentBarriers)) {
+            return;
+        }
 
         Set<Location> toRemove = new HashSet<>(currentBarriers);
         toRemove.removeAll(newBarriers);
@@ -544,6 +613,13 @@ public class WorldGuardHook implements Listener {
     }
 
     private void cleanupPlayerBarriers() {
+        if (!showBarriers) {
+            playerBarriers.clear();
+            originalBlocks.clear();
+            barrierViewers.clear();
+            return;
+        }
+        
         playerBarriers.entrySet().removeIf(entry -> {
             UUID playerUUID = entry.getKey();
             Player player = plugin.getServer().getPlayer(playerUUID);
