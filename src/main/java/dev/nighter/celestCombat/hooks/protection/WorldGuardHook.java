@@ -6,7 +6,6 @@ import com.sk89q.worldguard.WorldGuard;
 import com.sk89q.worldguard.protection.ApplicableRegionSet;
 import com.sk89q.worldguard.protection.flags.Flags;
 import com.sk89q.worldguard.protection.managers.RegionManager;
-import com.sk89q.worldguard.protection.regions.RegionQuery;
 import dev.nighter.celestCombat.CelestCombat;
 import dev.nighter.celestCombat.Scheduler;
 import dev.nighter.celestCombat.combat.CombatManager;
@@ -78,7 +77,6 @@ public class WorldGuardHook implements Listener {
 
     // Pre-computed region managers for performance
     private final Map<String, RegionManager> regionManagerCache = new ConcurrentHashMap<>();
-    private final RegionQuery regionQuery;
 
     private static class SafeZoneInfo {
         final boolean isSafeZone;
@@ -114,8 +112,6 @@ public class WorldGuardHook implements Listener {
         this.plugin = plugin;
         this.combatManager = combatManager;
 
-        // Pre-initialize region query for better performance
-        this.regionQuery = WorldGuard.getInstance().getPlatform().getRegionContainer().createQuery();
 
         reloadConfig();
         startCleanupTask();
@@ -718,9 +714,8 @@ public class WorldGuardHook implements Listener {
                 hasRegions = !regions.getRegions().isEmpty();
 
                 if (hasRegions) {
-                    // Use pre-initialized region query for better performance
-                    com.sk89q.worldedit.util.Location worldGuardLoc = BukkitAdapter.adapt(location);
-                    boolean pvpAllowed = regionQuery.testState(worldGuardLoc, null, Flags.PVP);
+                    // Check PVP flag respecting region priorities
+                    boolean pvpAllowed = regions.testState(null, Flags.PVP);
                     isSafeZone = !pvpAllowed;
                 }
             }
