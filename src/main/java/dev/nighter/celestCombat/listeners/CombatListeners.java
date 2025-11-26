@@ -65,35 +65,51 @@ public class CombatListeners implements Listener {
         plugin.debug("CombatListeners managers reloaded successfully");
     }
 
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onEntityDamageByEntity(EntityDamageByEntityEvent event) {
+        plugin.debug("=== COMBAT DAMAGE EVENT DEBUG ===");
+        plugin.debug("Event cancelled: " + event.isCancelled());
+        plugin.debug("Event priority: MONITOR");
+
+        if (event.isCancelled()) {
+            plugin.debug("Event is cancelled by another plugin, skipping combat tag");
+            return;
+        }
+
         Player attacker = null;
         Player victim = null;
 
         if (event.getEntity() instanceof Player) {
             victim = (Player) event.getEntity();
+            plugin.debug("Victim identified: " + victim.getName());
         } else {
+            plugin.debug("Entity damaged is not a player, ignoring");
             return;
         }
 
         Entity damager = event.getDamager();
+        plugin.debug("Damager type: " + damager.getClass().getSimpleName());
 
         if (damager instanceof Player) {
             attacker = (Player) damager;
+            plugin.debug("Attacker is player: " + attacker.getName());
         }
         else if (damager instanceof Projectile) {
             Projectile projectile = (Projectile) damager;
             if (projectile.getShooter() instanceof Player) {
                 attacker = (Player) projectile.getShooter();
+                plugin.debug("Attacker is player (projectile): " + attacker.getName());
+            } else {
+                plugin.debug("Projectile shooter is not a player");
             }
+        } else {
+            plugin.debug("Damager is not a player or projectile");
         }
 
-        // Handle newbie protection checks
-        // Check if victim has newbie protection from PvP
         if (attacker != null && newbieProtectionManager.shouldProtectFromPvP() &&
                 newbieProtectionManager.hasProtection(victim)) {
+            plugin.debug("Checking newbie protection for victim: " + victim.getName());
 
-            // Handle the protection (sends messages and potentially removes protection)
             boolean shouldBlock = newbieProtectionManager.handleDamageReceived(victim, attacker);
             if (shouldBlock) {
                 event.setCancelled(true);
@@ -102,7 +118,6 @@ public class CombatListeners implements Listener {
             }
         }
 
-        // Check if victim has newbie protection from mobs (when attacker is null or not a player)
         else if (attacker == null && newbieProtectionManager.shouldProtectFromMobs() &&
                 newbieProtectionManager.hasProtection(victim)) {
             event.setCancelled(true);
@@ -110,24 +125,28 @@ public class CombatListeners implements Listener {
             return;
         }
 
-        // Handle when protected player deals damage (removes protection if configured)
         if (attacker != null && newbieProtectionManager.hasProtection(attacker)) {
+            plugin.debug("Attacker has newbie protection, handling damage dealt");
             newbieProtectionManager.handleDamageDealt(attacker);
         }
 
-        // Continue with normal combat logic if damage wasn't blocked
-        if (attacker != null && victim != null && !attacker.equals(victim)) {
+        if (attacker != null && !attacker.equals(victim)) {
+            plugin.debug("Processing combat tag between " + attacker.getName() + " and " + victim.getName());
             // Track this as the most recent damage source
             lastDamageSource.put(victim.getUniqueId(), attacker.getUniqueId());
             lastDamageTime.put(victim.getUniqueId(), System.currentTimeMillis());
 
-            // Combat tag both players
             combatManager.tagPlayer(attacker, victim);
             combatManager.tagPlayer(victim, attacker);
+            plugin.debug("Both players tagged in combat successfully");
 
-            // Perform cleanup of stale records
             cleanupStaleDamageRecords();
+        } else {
+            plugin.debug("Combat tag skipped - attacker: " + (attacker != null ? attacker.getName() : "null") +
+                        ", victim: " + victim.getName() + ", same player: " + (attacker != null && attacker.equals(victim)));
         }
+
+        plugin.debug("=== END COMBAT DAMAGE EVENT ===");
     }
 
     private void cleanupStaleDamageRecords() {

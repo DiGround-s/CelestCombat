@@ -292,22 +292,34 @@ public class CombatManager {
     }
 
     public void tagPlayer(Player player, Player attacker) {
-        if (player == null || attacker == null) return;
+        plugin.debug("=== TAG PLAYER DEBUG ===");
+        plugin.debug("Player: " + (player != null ? player.getName() : "null"));
+        plugin.debug("Attacker: " + (attacker != null ? attacker.getName() : "null"));
+
+        if (player == null || attacker == null) {
+            plugin.debug("Player or attacker is null, aborting tag");
+            return;
+        }
 
         if (player.hasPermission("celestcombat.bypass.tag")) {
-            return;
-        }
-        
-        // Check if combat is disabled in this world
-        String worldName = player.getWorld().getName();
-        if (combatDisabledWorlds.getOrDefault(worldName, false)) {
+            plugin.debug("Player has bypass permission, skipping tag");
             return;
         }
 
+        String worldName = player.getWorld().getName();
+        plugin.debug("Player world: " + worldName);
+
+        if (combatDisabledWorlds.getOrDefault(worldName, false)) {
+            plugin.debug("Combat is disabled in world " + worldName + ", skipping tag");
+            return;
+        }
+
+        plugin.debug("Calling PlayerCombatTagEvent for " + player.getName());
         PlayerCombatTagEvent event = new PlayerCombatTagEvent(player, attacker, combatDurationMillis);
         Bukkit.getPluginManager().callEvent(event);
-        
+
         if (event.isCancelled()) {
+            plugin.debug("PlayerCombatTagEvent was cancelled by another plugin");
             return;
         }
 
@@ -318,26 +330,35 @@ public class CombatManager {
         boolean alreadyInCombatWithAttacker = alreadyInCombat &&
                 attacker.getUniqueId().equals(combatOpponents.get(playerUUID));
 
+        plugin.debug("Already in combat: " + alreadyInCombat);
+        plugin.debug("Already in combat with this attacker: " + alreadyInCombatWithAttacker);
+
         if (alreadyInCombatWithAttacker) {
             long currentEndTime = playersInCombat.get(playerUUID);
             if (newEndTime <= currentEndTime) {
+                plugin.debug("Combat time not extended (new: " + newEndTime + " <= current: " + currentEndTime + ")");
                 return;
             }
+            plugin.debug("Extending combat time from " + currentEndTime + " to " + newEndTime);
         }
 
-        // Disable flight instantly when entering combat (before setting combat state)
         if (disableFlightInCombat) {
+            plugin.debug("Disabling flight for " + player.getName());
             player.setFlying(false);
             player.setAllowFlight(false);
         }
 
         combatOpponents.put(playerUUID, attacker.getUniqueId());
         playersInCombat.put(playerUUID, newEndTime);
+        plugin.debug("Player " + player.getName() + " tagged in combat with " + attacker.getName());
 
         Scheduler.Task existingTask = combatTasks.get(playerUUID);
         if (existingTask != null) {
+            plugin.debug("Cancelling existing combat task for " + player.getName());
             existingTask.cancel();
         }
+
+        plugin.debug("=== END TAG PLAYER DEBUG ===");
     }
 
     public void punishCombatLogout(Player player) {
